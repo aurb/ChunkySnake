@@ -30,11 +30,12 @@ typedef struct posfood* FOODP;
 
 void *getkey(void *p);
 void draw(SNAKE p, int *add, FOODP food, Mix_Chunk * snd);
-void movepieces(SNAKE p, int add);
+void movepieces(SNAKE *p_head, SNAKE *p_tail, int add);
 void newfoodpos(FOODP);
 int collision(SNAKE p);
 int snakelen(SNAKE p);
 
+SNAKE head = NULL, tail = NULL;
 int stop = 0; //stop game variable
 int waitchar=1;
 int row,col;
@@ -60,8 +61,8 @@ int main()
   FOODP food = &snake_food;
   newfoodpos(food);
 
-  //snake head
-  SNAKE head=malloc(sizeof(struct snake));
+  /* intialize snake body */
+  head = tail = malloc(sizeof(struct snake));
   head -> posx=row/2;
   head -> posy=col/2;
   head -> next = NULL;
@@ -89,43 +90,39 @@ int main()
   //keyboard and music threads
   pthread_t readkey, playsound;
 
-  int alive = 1;
-  while(alive)
-     {
-      movepieces(head,add);
+    int alive = 1;
+    while(alive) {
+        movepieces(&head, &tail, add);
 
-      switch (direction)
-	{
-	  case 'w': case KEY_UP:
-	      head -> posx -= 1;
-	      break;
-	  case 'a': case KEY_LEFT:
-              head -> posy -= 1;
-	      break;
-	  case 'd': case KEY_RIGHT:
-	      head -> posy += 1;
-	      break;
-	  case 's': case KEY_DOWN:
-	      head -> posx += 1;
-	      break;
-	}
+        switch (direction){
+            case 'w': case KEY_UP:
+                head->posx -= 1;
+                break;
+            case 'a': case KEY_LEFT:
+                head->posy -= 1;
+                break;
+            case 'd': case KEY_RIGHT:
+                head->posy += 1;
+                break;
+            case 's': case KEY_DOWN:
+                head->posx += 1;
+                break;
+        }
 
-     draw(head, &add, food, snd);
+        draw(head, &add, food, snd);
+        refresh();
+        if (waitchar) pthread_create(&readkey,NULL, getkey, &direction);
+        alive = collision(head);
+        if (stop) {
+            mvprintw(0,0,"press SPACE to resume the game");
+            char c='a';
+            while(c != ' ') c = getch();
+            stop = 0;
+        }
+        usleep(1000/10*1000);
+    }
 
-     refresh();
-     if (waitchar) pthread_create(&readkey,NULL, getkey, &direction);
-     alive = collision(head);
-     if (stop)
-	{
-	 mvprintw(0,0,"press SPACE to resume the game");
- 	 char c='a';
-	 while(c != ' ') c = getch();
-	 stop = 0;
-	}
-     usleep(1000/10*1000);
-     }
-
-  //snake color
+  /* Game over. Draw dead snake. */
   init_pair(2, COLOR_RED, COLOR_BLACK);
 
   draw(head, &add, food, snd);
@@ -177,35 +174,28 @@ void *getkey(void *p)
 
 }
 
-void movepieces(SNAKE p, int add)
+void movepieces(SNAKE *p_head, SNAKE *p_tail, int add)
 {
-  int oldposx, oldposy;
-  SNAKE piece = p;
-  SNAKE start = p;
-
-  while(p -> next != NULL) p = p -> next;
-  if (add)
-  {
-    oldposx = p -> posx;
-    oldposy = p -> posy;
+  SNAKE p = NULL;
+  if (add == 0) { /* no food was eaten - move snake forward */
+    p = *p_tail;
+    /* all pieces(except head) move forward */
+    while(p->back != NULL) {
+      p->posx = p->back->posx;
+      p->posy = p->back->posy;
+      p = p->back;
+    }
   }
-  while(p -> back != NULL)
-   {
-     p -> posx = p -> back -> posx;
-     p -> posy = p -> back -> posy;
-     p = p -> back;
-   }
-
-  if (add)
-  { //create a new piece
-    while (p -> next != NULL) p = p -> next;
-    p -> next = malloc(sizeof(struct snake));
-    p -> next -> next = NULL;
-    p -> next -> back = p;
-    p -> next -> posx = oldposx;
-    p -> next -> posy = oldposy;
+  else { /* food eaten - expand snake body by 1 */
+    p = *p_head;
+    p->back = malloc(sizeof(struct snake));
+    p->back->next = p;
+    p->back->back = NULL;
+    p = p->back;
+    p->posx = p->next->posx;
+    p->posy = p->next->posy;
+    *p_head = p;
   }
-
 }
 
 void newfoodpos(FOODP food)
@@ -216,13 +206,14 @@ void newfoodpos(FOODP food)
 
 void draw(SNAKE p, int *add, FOODP food, Mix_Chunk * snd)
 {
-  if (p -> posx == food -> posx && p -> posy == food -> posy)
-    {
-      Mix_PlayChannel(-1,snd,0);
-      newfoodpos(food);
-      *add = 1;
-    }
-  else *add = 0;
+  /* food is eaten by the snake */
+  if (p -> posx == food -> posx && p -> posy == food -> posy) {
+    Mix_PlayChannel(-1,snd,0);
+    newfoodpos(food);
+    *add = 1;
+  }
+  else
+    *add = 0;
 
   /* clear window */
   attron(COLOR_PAIR(1));
@@ -230,8 +221,7 @@ void draw(SNAKE p, int *add, FOODP food, Mix_Chunk * snd)
 
   /* draw snake */
   attron(COLOR_PAIR(2));
-  while (p != NULL)
-  {
+  while (p != NULL) {
     if (p->next != NULL && (p->posx&3 ^ p->next->posx&3) == 1) {
       mvprintw(p->posx>>1, p->posy, FULL_BLOCK);
       p = p->next;
@@ -239,7 +229,7 @@ void draw(SNAKE p, int *add, FOODP food, Mix_Chunk * snd)
     else {
       mvprintw(p->posx>>1, p->posy, p->posx&1 ? LOWER_BLOCK : UPPER_BLOCK);
     }
-     p = p->next;
+    p = p->next;
   }
 
   /* draw food */
